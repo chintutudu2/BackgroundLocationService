@@ -1,118 +1,154 @@
-/**
- * Sample React Native App
- * https://github.com/facebook/react-native
- *
- * @format
- */
-
-import React from 'react';
-import type {PropsWithChildren} from 'react';
+import {View, Text, SafeAreaView} from 'react-native';
+import React, {useEffect, useState} from 'react';
+import Geolocation from 'react-native-geolocation-service';
 import {
-  SafeAreaView,
-  ScrollView,
-  StatusBar,
-  StyleSheet,
-  Text,
-  useColorScheme,
-  View,
-} from 'react-native';
+  accelerometer,
+  SensorTypes,
+  setUpdateIntervalForType,
+} from 'react-native-sensors';
 
-import {
-  Colors,
-  DebugInstructions,
-  Header,
-  LearnMoreLinks,
-  ReloadInstructions,
-} from 'react-native/Libraries/NewAppScreen';
+// Set the update interval for the accelerometer
+setUpdateIntervalForType(SensorTypes.accelerometer, 2000);
 
-type SectionProps = PropsWithChildren<{
-  title: string;
-}>;
+const App = () => {
+  let isMoving = false;
+  let lastLocation: any = null;
 
-function Section({children, title}: SectionProps): React.JSX.Element {
-  const isDarkMode = useColorScheme() === 'dark';
-  return (
-    <View style={styles.sectionContainer}>
-      <Text
-        style={[
-          styles.sectionTitle,
-          {
-            color: isDarkMode ? Colors.white : Colors.black,
-          },
-        ]}>
-        {title}
-      </Text>
-      <Text
-        style={[
-          styles.sectionDescription,
-          {
-            color: isDarkMode ? Colors.light : Colors.dark,
-          },
-        ]}>
-        {children}
-      </Text>
-    </View>
-  );
-}
+  const [location, setLocation] = useState<any>();
 
-function App(): React.JSX.Element {
-  const isDarkMode = useColorScheme() === 'dark';
+  // Helper function to calculate distance between two coordinates
+  const calculateDistance = (lat1: any, lon1: any, lat2: any, lon2: any) => {
+    const toRad = (value: any) => (value * Math.PI) / 180;
+    const R = 6371e3; // Earth's radius in meters
+    const φ1 = toRad(lat1);
+    const φ2 = toRad(lat2);
+    const Δφ = toRad(lat2 - lat1);
+    const Δλ = toRad(lon2 - lon1);
 
-  const backgroundStyle = {
-    backgroundColor: isDarkMode ? Colors.darker : Colors.lighter,
+    const a =
+      Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
+      Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+    return R * c; // Distance in meters
   };
 
+  const shouldTriggerHighAccuracy = (newLocation: any) => {
+    if (!lastLocation) {
+      lastLocation = newLocation;
+      return false;
+    }
+
+    const distance = calculateDistance(
+      lastLocation.coords.latitude,
+      lastLocation.coords.longitude,
+      newLocation.coords.latitude,
+      newLocation.coords.longitude,
+    );
+
+    if (distance > 100) {
+      // Customize this threshold
+      lastLocation = newLocation;
+      return true;
+    }
+
+    return false;
+  };
+
+  const getHighAccuracyLocation = () => {
+    Geolocation.getCurrentPosition(
+      position => {
+        console.log('High-accuracy location:', position);
+        setLocation(position);
+      },
+      error => {
+        console.error('Error fetching high-accuracy location:', error);
+      },
+      {
+        enableHighAccuracy: true, // Use GPS for precise updates
+        timeout: 10000,
+      },
+    );
+  };
+
+  useEffect(() => {
+    const subscription = accelerometer.subscribe(
+      ({x, y, z}) => {
+        // Calculate the magnitude of acceleration
+        const magnitude = Math.sqrt(x * x + y * y + z * z);
+        console.log(magnitude);
+
+        // Check if the magnitude indicates motion (adjust the threshold as needed)
+        if (magnitude > 1.2) {
+          if (!isMoving) {
+            console.log('Device started moving');
+            isMoving = true;
+
+            Geolocation.watchPosition(
+              position => {
+                console.log('Low-power location update:', position);
+                setLocation(position);
+                if (shouldTriggerHighAccuracy(position)) {
+                  console.log(
+                    'Device has moved significantly. Triggering high-accuracy GPS...',
+                  );
+                  getHighAccuracyLocation();
+                }
+              },
+              error => {
+                console.error('Error with low-power updates:', error);
+              },
+              {
+                enableHighAccuracy: false, // Conserve battery with low-power mode
+                distanceFilter: 500, // Broad movement detection (e.g., 500 meters)
+              },
+            );
+          }
+        } else {
+          if (isMoving) {
+            console.log('Device stopped moving');
+            isMoving = false;
+          }
+        }
+      },
+      error => {
+        console.error('Error with accelerometer:', error);
+      },
+    );
+
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, []);
+
+  if (!location) {
+    return null;
+  }
+
+  let date = new Date(location?.timestamp * 1000);
+  var hours = date.getHours();
+  var minutes = date.getMinutes();
+  var seconds = date.getSeconds();
+
   return (
-    <SafeAreaView style={backgroundStyle}>
-      <StatusBar
-        barStyle={isDarkMode ? 'light-content' : 'dark-content'}
-        backgroundColor={backgroundStyle.backgroundColor}
-      />
-      <ScrollView
-        contentInsetAdjustmentBehavior="automatic"
-        style={backgroundStyle}>
-        <Header />
-        <View
-          style={{
-            backgroundColor: isDarkMode ? Colors.black : Colors.white,
-          }}>
-          <Section title="Step One">
-            Edit <Text style={styles.highlight}>App.tsx</Text> to change this
-            screen and then come back to see your edits.
-          </Section>
-          <Section title="See Your Changes">
-            <ReloadInstructions />
-          </Section>
-          <Section title="Debug">
-            <DebugInstructions />
-          </Section>
-          <Section title="Learn More">
-            Read the docs to discover what to do next:
-          </Section>
-          <LearnMoreLinks />
-        </View>
-      </ScrollView>
+    <SafeAreaView
+      style={{flex: 1, justifyContent: 'center', alignItems: 'center'}}>
+      <View style={{flexDirection: 'row', gap: 8}}>
+        <Text>Time</Text>
+        <Text>
+          {hours} {minutes} : {seconds}
+        </Text>
+      </View>
+      <View style={{flexDirection: 'row', gap: 8}}>
+        <Text>latitude</Text>
+        <Text>{location?.coords?.latitude}</Text>
+      </View>
+      <View style={{flexDirection: 'row', gap: 8}}>
+        <Text>longitude</Text>
+        <Text>{location?.coords?.longitude}</Text>
+      </View>
     </SafeAreaView>
   );
-}
-
-const styles = StyleSheet.create({
-  sectionContainer: {
-    marginTop: 32,
-    paddingHorizontal: 24,
-  },
-  sectionTitle: {
-    fontSize: 24,
-    fontWeight: '600',
-  },
-  sectionDescription: {
-    marginTop: 8,
-    fontSize: 18,
-    fontWeight: '400',
-  },
-  highlight: {
-    fontWeight: '700',
-  },
-});
+};
 
 export default App;
